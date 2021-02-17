@@ -13,6 +13,8 @@
 #include "nlopt.h"
 #include "nearestPoint.h"
 #include "cxxopt.h"
+#include <algorithm>
+#include <chrono>
 
 using namespace std;
 using namespace cv;
@@ -112,7 +114,7 @@ vector<vec3> compute_center_points(const Mesh& mesh, const vector<vec3>& inside_
 
 
 pair<int,double> find_nearest(const Mesh& mesh, const vec3& point){
-    double dist = MAXFLOAT;
+    double dist = FLT_MAX;
     int parent;
 
     for(int i = 0 ; i< mesh.vertex_num(); i++){
