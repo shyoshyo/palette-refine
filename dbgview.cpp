@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <utility>
 #include <cmath>
+#include <vector>
+#include <tuple>
 using namespace std;
 
 
@@ -116,10 +118,6 @@ void display() {
       float ny = z2 * x3 - x2 * z3;
       float nz = x2 * y3 - y2 * x3;
 
-      float cx = (v[a][0] + v[b][0] + v[c][0]) * .3333333333f;
-      float cy = (v[a][1] + v[b][1] + v[c][1]) * .3333333333f;
-      float cz = (v[a][2] + v[b][2] + v[c][2]) * .3333333333f;
-
       float nsqure = nx * nx + ny * ny + nz * nz;
       if(nsqure > 1e-6f)
       {
@@ -128,16 +126,29 @@ void display() {
          ny /= nnorm;
          nz /= nnorm;
 
+         for(auto w : {
+            tuple<float, float, float, float>(18.f, 1.f, 1.f, 0.05f),
+            tuple<float, float, float, float>(1.f, 18.f, 1.f, 0.05f),
+            tuple<float, float, float, float>(1.f, 1.f, 18.f, 0.05f),
+            tuple<float, float, float, float>(1.f, 1.f, 1.f, 0.3333333333333f),
+         } )
+         {
 
-         glColor3f(cx, cy, cz);
-         glVertex3f(cx * 2 - 1, cy * 2 - 1, cz * 2 - 1);
+            float cx = (get<0>(w) * v[a][0] + get<1>(w) * v[b][0] + get<2>(w) * v[c][0]) * get<3>(w);
+            float cy = (get<0>(w) * v[a][1] + get<1>(w) * v[b][1] + get<2>(w) * v[c][1]) * get<3>(w);
+            float cz = (get<0>(w) * v[a][2] + get<1>(w) * v[b][2] + get<2>(w) * v[c][2]) * get<3>(w);
 
-         cx += nx * 0.1f;
-         cy += ny * 0.1f;
-         cz += nz * 0.1f;
 
-         glColor3f(cx, cy, cz);
-         glVertex3f(cx * 2 - 1, cy * 2 - 1, cz * 2 - 1);
+            glColor3f(cx, cy, cz);
+            glVertex3f(cx * 2 - 1, cy * 2 - 1, cz * 2 - 1);
+
+            cx += nx * 0.1f;
+            cy += ny * 0.1f;
+            cz += nz * 0.1f;
+
+            glColor3f(cx, cy, cz);
+            glVertex3f(cx * 2 - 1, cy * 2 - 1, cz * 2 - 1);
+         }
       }
    }
    glEnd();
