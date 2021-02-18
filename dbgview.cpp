@@ -175,12 +175,12 @@ void display() {
 	glEnd();
 
 
-	glPointSize(5);
+	glPointSize(.5f);
 	glBegin(GL_POINTS);
 	for(int i = 0; i < np; i++)
 	{
 		glColor3f(p[i][0], p[i][1], p[i][2]);
-		glVertex3f(p[i][0] * 2 - 1, p[i][1] * 2 - 1, p[i][2] * 2 - 1);
+		glVertex3f(p[i][0] * 2 - 1, p[	i][1] * 2 - 1, p[i][2] * 2 - 1);
 	}
 	glEnd();
 
