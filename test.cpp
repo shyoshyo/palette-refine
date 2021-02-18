@@ -34,7 +34,7 @@ using namespace nlopt;
 
 // #define K (10)
 #define K (5)
-#define N_REFINE (30)
+#define N_REFINE (3000)
 #define RATE (0.1)
 
 
@@ -95,6 +95,86 @@ float det(const float *p, const float *q, const float *r, const float *o)
 	return ans;
 }
 
+pair<float, bool> dist(const float *p, const float *q, const float *r, const float *o, float *wpqr)
+{
+	float qp[3] = {q[0] - p[0], q[1] - p[1], q[2] - p[2]};
+	float rp[3] = {r[0] - p[0], r[1] - p[1], r[2] - p[2]};
+	float op[3] = {o[0] - p[0], o[1] - p[1], o[2] - p[2]};
+
+	float nx = qp[1] * rp[2] - qp[2] * rp[1];
+	float ny = qp[2] * rp[0] - qp[0] * rp[2];
+	float nz = qp[0] * rp[1] - qp[1] * rp[0];
+	float nsqr = nx * nx + ny * ny + nz * nz;
+
+	// printf("nxyz %f %f %f   nsqr  %f\n", nx, ny, nz, nsqr);
+
+	float &wp=wpqr[0], &wq=wpqr[1], &wr=wpqr[2];
+	wp = 0.f, wq = 0.f, wr = 0.f;
+	if(nsqr > 1e-3f)
+	{
+		float nnorm = sqrtf(nsqr);
+		nx /= nnorm;
+		ny /= nnorm;
+		nz /= nnorm;
+
+		float d = op[0] * nx + op[1] * ny + op[2] * nz;
+		if(d < 0) return make_pair(0.f, false);
+
+		float t[3] = {
+			o[0] - d * nx,
+			o[1] - d * ny,
+			o[2] - d * nz,
+		};
+
+		// printf("proj %f %f %f   \n", t[0], t[1], t[2]);
+
+		float tp[3] = {t[0] - p[0], t[1] - p[1], t[2] - p[2]};
+
+		float npqtx = qp[1] * tp[2] - qp[2] * tp[1];
+		float npqty = qp[2] * tp[0] - qp[0] * tp[2];
+		float npqtz = qp[0] * tp[1] - qp[1] * tp[0];
+		float kspqt = npqtx * nx + npqty * ny + npqtz * nz;
+
+		float nptrx = tp[1] * rp[2] - tp[2] * rp[1];
+		float nptry = tp[2] * rp[0] - tp[0] * rp[2];
+		float nptrz = tp[0] * rp[1] - tp[1] * rp[0];
+		float ksptr = nptrx * nx + nptry * ny + nptrz * nz;
+
+		// printf("nxyz %f %f %f  \n", nx, ny, nz);
+
+		// printf("npqtx, npqty, npqtz %f %f %f  \n", npqtx, npqty, npqtz);
+		// printf("kspqt, ksptr %f %f   \n", kspqt, ksptr);
+
+		wq = ksptr / nnorm;
+		wr = kspqt / nnorm;
+
+		if(wq < 0.f) wq = 0.f;
+		if(wq > 1.f) wq = 1.f;
+		if(wr < 0.f) wr = 0.f;
+		if(wr > 1.f) wr = 1.f;
+
+		wp = 1.f - wq - wr;
+
+		// printf("wq, wr %f %f %f   \n", wq, wr, 0.f);
+	}
+	else
+	{
+		float d = op[0] * nx + op[1] * ny + op[2] * nz;
+		if(d < 0) return make_pair(0.f, false);
+
+		wp = 1.f;
+		wq = 0.f;
+		wr = 0.f;
+	}
+
+	float to[3] = {
+		p[0] * wp + q[0] * wq + r[0] * wr - o[0],
+		p[1] * wp + q[1] * wq + r[1] * wr - o[1],
+		p[2] * wp + q[2] * wq + r[2] * wr - o[2],
+	};
+	return make_pair(sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]), true);
+}
+
 void ddet(const float *p, const float *q, const float *r, const float *o, float *dp, float *dq, float *dr, float w)
 {
 	dp[0] += w * ((q[1] - o[1]) * (r[2] - o[2]) - (q[2] - o[2]) * (r[1] - o[1]));
@@ -128,17 +208,41 @@ void dloss1(const float (*v)[3], float (*dv)[3], float w)
 	}
 }
 
-
 float loss2(const float (*v)[3])
 {
-	float ans = 0.f;
-	for(int i = 0; i < nf; i++)
-		for(int j = 0; j < np; j++)
+	float wpqr[15][3];
+
+	double ans = 0.f;
+	for(int i = 0; i < np; i++)
+	{
+		float mindist = 1e10f;
+		int mindistindex = 0;
+
+		for(int j = 0; j < nf; j++)
 		{
-			float d = det(v[f[i][0]], v[f[i][1]], v[f[i][2]], p[j]);
-			if(d > 0) ans += d;
+			auto d = dist(v[f[j][0]], v[f[j][1]], v[f[j][2]], p[i], wpqr[j]);
+			if(!d.second) continue;
+
+
+			if((d.first) > 100)
+			{
+				printf("d = %f\n", d.first);
+				getchar();
+			}
+
+			if(mindist > d.first)
+			{
+				mindist = d.first;
+				mindistindex = j;
+			}
 		}
-	return ans;
+
+		if(mindist < 1e9)
+		{
+			ans += mindist;
+		}
+	}
+	return ans / np;
 }
 
 void dloss2(const float (*v)[3], float (*dv)[3], float w)
@@ -183,8 +287,28 @@ void dloss3(const float (*v)[3], float (*dv)[3], float w)
 		}
 }
 
+void test()
+{
+	float P[3] = {5, 4, 2};
+	float Q[3] = {8, 2, 9};
+	float R[3] = {4, -2, 7};
+
+	float O[3] = {6, 2, 3};
+
+	float tmp[3];
+
+
+	printf("%f\n", dist(P, Q, R, O, tmp).first);
+	printf("%f\n", dist(P, R, Q, O, tmp).first);
+}
+
 int main(int argc, char** argv)
 {
+	/*
+	test();
+	return 0;
+	*/
+
     Mat img = imread(argv[1]);
     for (int i = 0; i < img.rows; ++i)
 		for (int j = 0; j < img.cols; ++j)
@@ -235,7 +359,7 @@ int main(int argc, char** argv)
 
 		for(int i = 1; i < np; i++)
 		{
-			float d = 1e60;
+			float d = 1e10f;
 
 			for(auto j : chooselist)
 			{
@@ -283,7 +407,7 @@ int main(int argc, char** argv)
 
 		memset(dv, 0, sizeof dv);
 		dloss1(v, dv, w1);
-		dloss2(v, dv, w2);
+		// dloss2(v, dv, w2);
 		dloss3(v, dv, w3);
 
 		for(int j = 0; j < nv; j++)
@@ -296,7 +420,7 @@ int main(int argc, char** argv)
 			}
 			// puts("");
 		}
-		if(_ % 1 == 0) printf(" after %d: %lf %lf %lf\n", _, loss1(v), loss2(v), loss3(v));
+		if(_ % 100 == 0) printf(" after %d: %lf %lf %lf\n", _, loss1(v), loss2(v), loss3(v));
 	}
 
 
