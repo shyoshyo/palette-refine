@@ -34,7 +34,7 @@ using namespace nlopt;
 
 // #define K (10)
 #define K (5)
-#define N_REFINE (3000)
+#define N_REFINE (100)
 #define RATE (0.1)
 
 
@@ -172,7 +172,52 @@ pair<float, bool> dist(const float *p, const float *q, const float *r, const flo
 		p[1] * wp + q[1] * wq + r[1] * wr - o[1],
 		p[2] * wp + q[2] * wq + r[2] * wr - o[2],
 	};
-	return make_pair(sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]), true);
+	// return make_pair(sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]), true);
+	return make_pair((to[0] * to[0] + to[1] * to[1] + to[2] * to[2]), true);
+}
+
+void ddist(const float *p, const float *q, const float *r, const float *o, float *wpqr, float *dp, float *dq, float *dr, float w)
+{
+	const float &wp=wpqr[0], &wq=wpqr[1], &wr=wpqr[2];
+
+	float to[3] = {
+		p[0] * wp + q[0] * wq + r[0] * wr - o[0],
+		p[1] * wp + q[1] * wq + r[1] * wr - o[1],
+		p[2] * wp + q[2] * wq + r[2] * wr - o[2],
+	};
+
+	// float k = w / (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
+	float k = w + w;
+
+	if(isnan(k))
+	{
+		printf(" start ddist k = %f\n", k);
+		getchar();
+	}
+
+	if(isnan(dp[0]))
+	{
+		printf(" start ddist dp[0] = %f\n", dp[0]);
+		getchar();
+	}
+
+	dp[0] += k * to[0] * wp;
+	dp[1] += k * to[1] * wp;
+	dp[2] += k * to[2] * wp;
+	
+	dq[0] += k * to[0] * wq;
+	dq[1] += k * to[1] * wq;
+	dq[2] += k * to[2] * wq;
+	
+	dr[0] += k * to[0] * wr;
+	dr[1] += k * to[1] * wr;
+	dr[2] += k * to[2] * wr;
+
+	if(isnan(dp[0]))
+	{
+		printf(" end ddist dp[0] = %f,    %f %f %f\n", dp[0], k, to[0], wp);
+		getchar();
+	}
 }
 
 void ddet(const float *p, const float *q, const float *r, const float *o, float *dp, float *dq, float *dr, float w)
@@ -247,16 +292,38 @@ float loss2(const float (*v)[3])
 
 void dloss2(const float (*v)[3], float (*dv)[3], float w)
 {
-	for(int i = 0; i < nf; i++)
-		for(int j = 0; j < np; j++)
+	float wpqr[15][3];
+
+	for(int i = 0; i < np; i++)
+	{
+		float mindist = 1e10f;
+		int mindistindex = 0;
+
+		for(int j = 0; j < nf; j++)
 		{
-			float d = det(v[f[i][0]], v[f[i][1]], v[f[i][2]], p[j]);
-			if(d > 0)
+			auto d = dist(v[f[j][0]], v[f[j][1]], v[f[j][2]], p[i], wpqr[j]);
+			if(!d.second) continue;
+
+			if((d.first) > 100)
 			{
-				ddet(v[f[i][0]], v[f[i][1]], v[f[i][2]], p[j],
-					dv[f[i][0]], dv[f[i][1]], dv[f[i][2]], w);
+				printf("d = %f\n", d.first);
+				getchar();
+			}
+
+			if(mindist > d.first)
+			{
+				mindist = d.first;
+				mindistindex = j;
 			}
 		}
+
+		if(mindist < 1e9)
+		{
+			int j = mindistindex;
+			ddist(v[f[j][0]], v[f[j][1]], v[f[j][2]], p[i], wpqr[j], 
+				dv[f[j][0]], dv[f[j][1]], dv[f[j][2]], w / np);
+		}
+	}
 }
 
 float loss3(const float (*v)[3])
@@ -296,7 +363,6 @@ void test()
 	float O[3] = {6, 2, 3};
 
 	float tmp[3];
-
 
 	printf("%f\n", dist(P, Q, R, O, tmp).first);
 	printf("%f\n", dist(P, R, Q, O, tmp).first);
@@ -398,8 +464,8 @@ int main(int argc, char** argv)
 	// printf("nf = %d, sizeof(f) = %lld\n", nf, sizeof(f));
 	printf(" before refine: %lf %lf %lf\n", loss1(v), loss2(v), loss3(v));
 
-	float w1 = 0.0001f;
-	float w2 = 0.4f / np;
+	float w1 = 0.01f;
+	float w2 = 8.f;
 	float w3 = 1.f;
 	for(int _ = 0; _ < N_REFINE; _++)
 	{
@@ -407,8 +473,8 @@ int main(int argc, char** argv)
 
 		memset(dv, 0, sizeof dv);
 		dloss1(v, dv, w1);
-		// dloss2(v, dv, w2);
-		dloss3(v, dv, w3);
+		dloss2(v, dv, w2);
+		// dloss3(v, dv, w3);
 
 		for(int j = 0; j < nv; j++)
 		{
@@ -420,7 +486,7 @@ int main(int argc, char** argv)
 			}
 			// puts("");
 		}
-		if(_ % 100 == 0) printf(" after %d: %lf %lf %lf\n", _, loss1(v), loss2(v), loss3(v));
+		if(_ % 1 == 0) printf(" after %d: %lf %lf %lf\n", _, loss1(v), loss2(v), loss3(v));
 	}
 
 
