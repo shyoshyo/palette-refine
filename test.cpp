@@ -18,10 +18,10 @@
 #include <random>
 #include <stdio.h>
 #include <time.h>
-#include "vec3.h"
-#include "nlopt.h"
-#include "nearestPoint.h"
-#include "cxxopt.h"
+// #include "vec3.h"
+// #include "nlopt.h"
+// #include "nearestPoint.h"
+// #include "cxxopt.h"
 #include <algorithm>
 #include <chrono>
 using namespace std;
@@ -34,23 +34,8 @@ using namespace nlopt;
 
 // #define K (10)
 #define K (5)
-#define N_REFINE (100)
-#define RATE (0.1)
-
-
-int np;
-float p[10000005][3];
-float center[3];
-
-
-bool choose[10000005];
-vector<int> chooselist;
-
-float v[15][3];
-int nv;
-
-int (*f)[3] = NULL;
-int nf;
+#define N_REFINE (500)
+#define RATE (0.2)
 
 float dist(float *u, float *v)
 {
@@ -235,6 +220,17 @@ void ddet(const float *p, const float *q, const float *r, const float *o, float 
 	dr[2] += w * ((p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]));
 }
 
+
+int np;
+float p[10000005][3];
+float center[3];
+
+int (*f)[3] = NULL;
+int nf;
+
+int nv;
+
+
 float loss1(const float (*v)[3])
 {
 	float ans = 0.f;
@@ -261,7 +257,7 @@ float loss2(const float (*v)[3])
 	for(int i = 0; i < np; i++)
 	{
 		float mindist = 1e10f;
-		int mindistindex = 0;
+		// int mindistindex = 0;
 
 		for(int j = 0; j < nf; j++)
 		{
@@ -271,14 +267,14 @@ float loss2(const float (*v)[3])
 
 			if((d.first) > 100)
 			{
-				printf("d = %f\n", d.first);
+				printf("loss2: d = %f\n", d.first);
 				getchar();
 			}
 
 			if(mindist > d.first)
 			{
 				mindist = d.first;
-				mindistindex = j;
+				// mindistindex = j;
 			}
 		}
 
@@ -290,8 +286,12 @@ float loss2(const float (*v)[3])
 	return ans / np;
 }
 
+
 void dloss2(const float (*v)[3], float (*dv)[3], float w)
 {
+	int count_out = 0;
+
+
 	float wpqr[15][3];
 
 	for(int i = 0; i < np; i++)
@@ -322,9 +322,158 @@ void dloss2(const float (*v)[3], float (*dv)[3], float w)
 			int j = mindistindex;
 			ddist(v[f[j][0]], v[f[j][1]], v[f[j][2]], p[i], wpqr[j], 
 				dv[f[j][0]], dv[f[j][1]], dv[f[j][2]], w / np);
+
+			count_out += 1;
 		}
 	}
+
+	// printf("                                           dloss: %d / %d   %f\n", count_out, np, count_out / (float)np);
 }
+
+#define MARCH_STEP (32)
+float w_march[MARCH_STEP][MARCH_STEP][MARCH_STEP];
+
+void init_fastloss2()
+{
+
+	for(int i = 0; i < np; i++)
+	{
+		int x = int(p[i][0] * (MARCH_STEP - 1));
+		int y = int(p[i][1] * (MARCH_STEP - 1));
+		int z = int(p[i][2] * (MARCH_STEP - 1));
+
+		if(x < 0) x = 0; if(x > (MARCH_STEP - 2)) x = (MARCH_STEP - 2);
+		if(y < 0) y = 0; if(y > (MARCH_STEP - 2)) y = (MARCH_STEP - 2);
+		if(z < 0) z = 0; if(z > (MARCH_STEP - 2)) z = (MARCH_STEP - 2);
+
+		float dx = (p[i][0] * (MARCH_STEP - 1)) - x;
+		float dy = (p[i][1] * (MARCH_STEP - 1)) - y;
+		float dz = (p[i][2] * (MARCH_STEP - 1)) - z;
+
+		float dx_ = 1 - dx;
+		float dy_ = 1 - dy;
+		float dz_ = 1 - dz;
+
+		// printf("init_fastloss2  %f %f %f   p[i] =  %f %f %f\n", dx, dy, dz, p[i][0], p[i][1], p[i][2]);
+		// getchar();
+
+		assert(-1e-2f <= dx && dx <= 1.f + 1e-2f);
+		assert(-1e-2f <= dy && dy <= 1.f + 1e-2f);
+		assert(-1e-2f <= dz && dz <= 1.f + 1e-2f);
+
+		w_march[x][y][z] += (dx_) * (dy_) * (dz_);
+		w_march[x + 1][y][z] += (dx) * (dy_) * (dz_);
+		w_march[x][y + 1][z] += (dx_) * (dy) * (dz_);
+		w_march[x + 1][y + 1][z] += (dx) * (dy) * (dz_);
+		w_march[x][y][z + 1] += (dx_) * (dy_) * (dz);
+		w_march[x + 1][y][z + 1] += (dx) * (dy_) * (dz);
+		w_march[x][y + 1][z + 1] += (dx_) * (dy) * (dz);
+		w_march[x + 1][y + 1][z + 1] += (dx) * (dy) * (dz);
+	}
+}
+
+float fastloss2(const float (*v)[3])
+{
+	float wpqr[15][3];
+
+	double ans = 0.f;
+
+	for(int i = 0; i < MARCH_STEP; i++)
+		for(int j = 0; j < MARCH_STEP; j++)
+			for(int k = 0; k < MARCH_STEP; k++)
+			{
+				if(w_march[i][j][k] <= 0) continue;
+
+				
+				float myp[3] =
+				{
+					i / (float)(MARCH_STEP - 1),
+					j / (float)(MARCH_STEP - 1),
+					k / (float)(MARCH_STEP - 1)
+				}; 
+
+				float mindist = 1e10f;
+				// int mindistindex = 0;
+
+				for(int s = 0; s < nf; s++)
+				{
+					auto d = dist(v[f[s][0]], v[f[s][1]], v[f[s][2]], myp, wpqr[s]);
+					if(!d.second) continue;
+
+
+					if((d.first) > 100)
+					{
+						printf("d = %f\n", d.first);
+						getchar();
+					}
+
+					if(mindist > d.first)
+					{
+						mindist = d.first;
+						// mindistindex = s;
+					}
+				}
+
+				if(mindist < 1e9)
+				{
+					ans += mindist * w_march[i][j][k];
+				}
+			}
+	return ans / np;
+}
+
+
+void dfastloss2(const float (*v)[3], float (*dv)[3], float w)
+{
+	float wpqr[15][3];
+
+	for(int i = 0; i < MARCH_STEP; i++)
+		for(int j = 0; j < MARCH_STEP; j++)
+			for(int k = 0; k < MARCH_STEP; k++)
+			{
+				if(w_march[i][j][k] <= 0) continue;
+
+				
+				float myp[3] =
+				{
+					i / (float)(MARCH_STEP - 1),
+					j / (float)(MARCH_STEP - 1),
+					k / (float)(MARCH_STEP - 1)
+				}; 
+
+				float mindist = 1e10f;
+				int mindistindex = 0;
+
+				for(int s = 0; s < nf; s++)
+				{
+					auto d = dist(v[f[s][0]], v[f[s][1]], v[f[s][2]], myp, wpqr[s]);
+					if(!d.second) continue;
+
+
+					if((d.first) > 100)
+					{
+						printf("d = %f\n", d.first);
+						getchar();
+					}
+
+					if(mindist > d.first)
+					{
+						mindist = d.first;
+						mindistindex = s;
+					}
+				}
+
+				if(mindist < 1e9)
+				{
+					int &s = mindistindex;
+					// ans += mindist * w_march[i][j][k];
+					ddist(v[f[s][0]], v[f[s][1]], v[f[s][2]], myp, wpqr[s],
+						dv[f[s][0]], dv[f[s][1]], dv[f[s][2]], w * w_march[i][j][k] / np);
+				}
+			}
+
+}
+
 
 float loss3(const float (*v)[3])
 {
@@ -353,6 +502,12 @@ void dloss3(const float (*v)[3], float (*dv)[3], float w)
 			}
 		}
 }
+
+
+bool choose[10000005];
+vector<int> chooselist;
+
+float v[15][3];
 
 void test()
 {
@@ -418,7 +573,7 @@ int main(int argc, char** argv)
 		printf("%d\n", startchoose);
 	}
 
-	for(int i = 1; i < K; i++)
+	for(int _ = 1; _ < K; _++)
 	{
 		int thischoose = 0;
 		float maxdist = 0.f;
@@ -461,20 +616,40 @@ int main(int argc, char** argv)
 	convhull_3d_build(_v, nv, (int**)(void*)&f, &nf);
 
 
+	init_fastloss2();
+
 	// printf("nf = %d, sizeof(f) = %lld\n", nf, sizeof(f));
 	printf(" before refine: %lf %lf %lf\n", loss1(v), loss2(v), loss3(v));
 
 	float w1 = 0.01f;
-	float w2 = 8.f;
+	float w2 = 10.f;
 	float w3 = 1.f;
 	for(int _ = 0; _ < N_REFINE; _++)
 	{
 		float dv[15][3];
 
+		/*
+		memset(dv, 0, sizeof dv);
+		// dloss1(v, dv, w1);
+		dloss2(v, dv, w2);
+
+		for(int i = 0; i < nf; i++)
+			printf(" dloss2 %f %f %f\n", dv[i][0], dv[i][1], dv[i][2]);
+
+		memset(dv, 0, sizeof dv);
+		dfastloss2(v, dv, w2);
+
+		for(int i = 0; i < nf; i++)
+			printf(" dfastloss2 %f %f %f\n", dv[i][0], dv[i][1], dv[i][2]);
+
+		break;
+		// dloss3(v, dv, w3);
+		*/
+
 		memset(dv, 0, sizeof dv);
 		dloss1(v, dv, w1);
-		dloss2(v, dv, w2);
-		// dloss3(v, dv, w3);
+		dfastloss2(v, dv, w2);
+
 
 		for(int j = 0; j < nv; j++)
 		{
@@ -486,7 +661,8 @@ int main(int argc, char** argv)
 			}
 			// puts("");
 		}
-		if(_ % 1 == 0) printf(" after %d: %lf %lf %lf\n", _, loss1(v), loss2(v), loss3(v));
+		// if(_ % 1 == 0) printf(" after %d: %lf %lf %lf     fastloss2 %f\n", _, loss1(v), loss2(v), loss3(v), fastloss2(v));
+		if(_ % 10 == 0) printf(" after %d: %lf ?? %lf     fastloss2 %f\n", _, loss1(v), loss3(v), fastloss2(v));
 	}
 
 
